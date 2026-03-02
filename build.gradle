@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    maven {
+        url = uri('https://maven.bitwig.com/')
+    }
+}
+
+dependencies {
+    implementation 'com.bitwig:extension-api:18'
+}
+
+group = 'com.smetoyer.bitwig'
+version = '1.0.0'
+description = 'PreSonus FaderPort v2 Controller Extension for Bitwig Studio'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+    archiveFileName = 'PreSonusFaderPort2.bwextension'
+
+    doLast {
+        def bitwigExtDir = file("${System.getProperty('user.home')}/Documents/Bitwig Studio/Extensions")
+        if (bitwigExtDir.exists()) {
+            copy {
+                from archiveFile
+                into bitwigExtDir
+            }
+            println "Installed to ${bitwigExtDir}"
+        }
+    }
+}
