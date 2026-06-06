@@ -1,0 +1,30 @@
+{
+  "name": "Bitwig FaderPort2 Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/maven:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/gradle:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+  "postCreateCommand": "java -version && mvn -version && gradle -version",
+  "remoteUser": "vscode"
+}
