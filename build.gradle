@@ -9,11 +9,11 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.bitwig:extension-api:18'
+    implementation "com.bitwig:extension-api:${bitwigApiVersion}"
 }
 
 group = 'com.smetoyer.bitwig'
-version = '1.0.0'
+version = "${project.version}"
 description = 'PreSonus FaderPort v2 Controller Extension for Bitwig Studio'
 
 java {
@@ -31,7 +31,10 @@ jar {
                 from archiveFile
                 into bitwigExtDir
             }
-            println "Installed to ${bitwigExtDir}"
+            println "✓ Extension installed to ${bitwigExtDir}"
+        } else {
+            println "⚠ Bitwig Extensions directory not found: ${bitwigExtDir}"
+            println "  Run Bitwig Studio to create the directory, then run build again"
         }
     }
 }

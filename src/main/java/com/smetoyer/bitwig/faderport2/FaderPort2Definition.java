@@ -11,6 +11,9 @@ public class FaderPort2Definition extends ControllerExtensionDefinition
 {
    private static final UUID DRIVER_ID =
       UUID.fromString("d3f7a1b2-c4e5-4f6a-8b9c-0d1e2f3a4b5c");
+   
+   // Version must be kept in sync with gradle.properties (project.version)
+   private static final String VERSION = "1.0.0";
 
    @Override
    public String getName()
@@ -27,7 +30,7 @@ public class FaderPort2Definition extends ControllerExtensionDefinition
    @Override
    public String getVersion()
    {
-      return "1.0.0";
+      return VERSION;
    }
 
    @Override
@@ -51,7 +54,7 @@ public class FaderPort2Definition extends ControllerExtensionDefinition
    @Override
    public int getRequiredAPIVersion()
    {
-      return 18;
+      return 25;
    }
 
    @Override

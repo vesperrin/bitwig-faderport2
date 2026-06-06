@@ -17,10 +17,6 @@ public class LayerGroup
 
    /**
     * Activates the given layer and deactivates all others in the group.
-    * If the layer is already active, this is a no-op.
-    */
-   /**
-    * Activates the given layer and deactivates all others in the group.
     * Pass null to deactivate all layers without activating any.
     * If the layer is already active, this is a no-op.
     */

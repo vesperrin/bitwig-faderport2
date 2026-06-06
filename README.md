@@ -8,7 +8,7 @@ A Bitwig Studio controller extension for the PreSonus FaderPort v2 (single-chann
 
 - Bitwig Studio (tested on 5.x)
 - PreSonus FaderPort v2 in **Studio One native mode**
-- Java 21 (for building from source only)
+- Java 25 (for building from source only)
 
 ### Setting Studio One Native Mode on the FaderPort v2
 
@@ -34,7 +34,7 @@ A Bitwig Studio controller extension for the PreSonus FaderPort v2 (single-chann
 ### Build from Source
 
 ```bash
-JAVA_HOME=/path/to/jdk21 ./gradlew build
+JAVA_HOME=/path/to/jdk5 ./gradlew build
 ```
 
 The compiled extension is automatically copied to your Bitwig Extensions directory on a successful build.

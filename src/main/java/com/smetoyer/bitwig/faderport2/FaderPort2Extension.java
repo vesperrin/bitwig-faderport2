@@ -58,6 +58,7 @@ public class FaderPort2Extension extends ControllerExtension
    private HardwareSurface mHardwareSurface;
    private HardwareSlider mFader;
    private HardwareButton mFaderTouch;
+   private AbsoluteHardwareControlBinding mFaderBinding; // Current active fader binding
    private RelativeHardwareKnob mEncoder;
    private MidiOut mMidiOut;
 
@@ -121,7 +122,6 @@ public class FaderPort2Extension extends ControllerExtension
    private CursorRemoteControlsPage mRemoteControls;
    private MasterTrack mMasterTrack;
    private Application mApplication;
-   private Arranger mArranger;
 
    // ---- Layer Framework ----
    private Layers mLayers;
@@ -173,7 +173,6 @@ public class FaderPort2Extension extends ControllerExtension
       mRemoteControls = mCursorDevice.createCursorRemoteControlsPage(1);
       mMasterTrack = host.createMasterTrack(0);
       mApplication = host.createApplication();
-      mArranger = host.createArranger();
 
       // Subscribe to all values read during flush/updateHardware
       mTransport.isPlaying().addValueObserver(v -> {});
@@ -237,16 +236,9 @@ public class FaderPort2Extension extends ControllerExtension
          midiIn.createNoteOffActionMatcher(0, NOTE_FADER_TOUCH));
       mFader.setHardwareButton(mFaderTouch);
 
-      // Bypass Bitwig's pickup/takeover mode for the motorized fader.
-      // When the user is physically touching the fader, directly apply its
-      // 14-bit pitch bend value to the active target — no pickup delay.
-      midiIn.setMidiCallback((status, data1, data2) -> {
-         if (status == 0xE0 && mFaderTouch.isPressed().get())
-         {
-            final int value14bit = (data1 & 0x7F) | ((data2 & 0x7F) << 7);
-            getActiveFaderTarget().set(value14bit / 16383.0);
-         }
-      });
+      // The hardware binding created in updateFaderHardwareBinding() will handle
+      // sending fader values to the DAW. The motor fader position is updated by
+      // the value observers for each fader target.
    }
 
    private void createClickEncoder(final MidiIn midiIn)
@@ -813,13 +805,29 @@ public class FaderPort2Extension extends ControllerExtension
    }
 
    /**
-    * Drives the motor fader to the position of the currently active target.
-    * The fader → parameter direction is handled by the direct MIDI callback
-    * in createMotorFader, so no Bitwig binding is needed here.
+    * Creates and manages the hardware binding for the fader to send values to the DAW.
+    * Removes any existing binding and creates a new one for the currently active target.
+    * Motor fader feedback is handled separately by the value observers.
     */
    private void updateFaderHardwareBinding()
    {
       final SettableRangedValue target = getActiveFaderTarget();
+      
+      // Remove old binding if it exists
+      if (mFaderBinding != null)
+      {
+         mFaderBinding.removeBinding();
+         mFaderBinding = null;
+      }
+      
+      // Create new binding for the active target
+      // This allows the fader to send values to the DAW when moved
+      if (target != null)
+      {
+         mFaderBinding = mFader.addBindingWithRange(target, 0, 1);
+      }
+      
+      // Also update motor fader position to show current target value
       final int value14bit = (int) (target.get() * 16383);
       sendFaderPosition(value14bit);
    }

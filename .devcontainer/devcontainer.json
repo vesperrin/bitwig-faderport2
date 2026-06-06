@@ -5,16 +5,11 @@
   },
   "features": {
     "ghcr.io/devcontainers/features/java:1": {
-      "version": "latest"
-    },
-    "ghcr.io/devcontainers/features/maven:1": {
-      "version": "latest"
-    },
-    "ghcr.io/devcontainers/features/gradle:1": {
-      "version": "latest"
+      "version": "none",
+      "installGradle": "true",
+      "installMaven": "true"
     },
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-in-docker:1": {}
   },
   "customizations": {
     "vscode": {
