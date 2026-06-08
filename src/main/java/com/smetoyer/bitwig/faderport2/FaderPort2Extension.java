@@ -849,7 +849,7 @@ public class FaderPort2Extension extends ControllerExtension
    private void initShiftLayer()
    {
       // Shift+Prev = Undo
-      mBindingHelper.bindPressed(mShiftLayer, mPrevButton, () -> mApplication.undo());
+      mBindingHelper.bindPressed(mShiftLayer, mPrevButton, this::undoAction);
 
       // Shift+Next = Redo
       mBindingHelper.bindPressed(mShiftLayer, mNextButton, this::redoAction);
