@@ -36,5 +36,15 @@ jar {
             println "⚠ Bitwig Extensions directory not found: ${bitwigExtDir}"
             println "  Run Bitwig Studio to create the directory, then run build again"
         }
+        // Also copy the built extension into the repository `dist/` folder
+        def distDir = file("${project.projectDir}/dist")
+        if (!distDir.exists()) {
+            distDir.mkdirs()
+        }
+        copy {
+            from archiveFile
+            into distDir
+        }
+        println "✓ Extension copied to ${distDir}"
     }
 }

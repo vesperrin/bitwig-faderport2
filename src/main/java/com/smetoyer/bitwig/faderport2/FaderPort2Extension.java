@@ -161,11 +161,23 @@ public class FaderPort2Extension extends ControllerExtension
    {
       final ControllerHost host = getHost();
 
-      // 1. MIDI I/O
-      final MidiIn midiIn = host.getMidiInPort(0);
-      mMidiOut = host.getMidiOutPort(0);
+      setupMidiAndBitwigObjects(host);
+      subscribeBitwigObservers();
 
-      // 2. Bitwig API objects
+      mHardwareSurface = host.createHardwareSurface();
+      createHardwareControls(host.getMidiInPort(0));
+      subscribeHardwareObservers();
+
+      mLayers = new Layers(this);
+      createLayers();
+
+      startKeepAlive();
+      host.println("FaderPort v2 initialized.");
+   }
+
+   private void setupMidiAndBitwigObjects(final ControllerHost host)
+   {
+      mMidiOut = host.getMidiOutPort(0);
       mTransport = host.createTransport();
       mCursorTrack = host.createCursorTrack("fp2_cursor", "FP2 Cursor", 0, 0, true);
       mCursorDevice = mCursorTrack.createCursorDevice("fp2_device", "FP2 Device", 0,
@@ -173,8 +185,10 @@ public class FaderPort2Extension extends ControllerExtension
       mRemoteControls = mCursorDevice.createCursorRemoteControlsPage(1);
       mMasterTrack = host.createMasterTrack(0);
       mApplication = host.createApplication();
+   }
 
-      // Subscribe to all values read during flush/updateHardware
+   private void subscribeBitwigObservers()
+   {
       mTransport.isPlaying().addValueObserver(v -> {});
       mTransport.isArrangerRecordEnabled().addValueObserver(v -> {});
       mTransport.isArrangerLoopEnabled().addValueObserver(v -> {});
@@ -187,26 +201,20 @@ public class FaderPort2Extension extends ControllerExtension
       mCursorTrack.name().addValueObserver(v -> {});
       mCursorDevice.isEnabled().addValueObserver(v -> {});
       mCursorDevice.isPinned().addValueObserver(v -> {});
-      mRemoteControls.getParameter(0).name().addValueObserver(v -> {});
+      getDeviceControl().name().addValueObserver(v -> {});
+   }
 
-      // 3. Hardware surface
-      mHardwareSurface = host.createHardwareSurface();
-      createHardwareControls(midiIn);
-
-      // Subscribe hardware button isPressed() values used in LED suppliers
+   private void subscribeHardwareObservers()
+   {
       mRewindButton.isPressed().addValueObserver(v -> {});
       mFfwdButton.isPressed().addValueObserver(v -> {});
       mShiftButton.isPressed().addValueObserver(v -> {});
       mFaderTouch.isPressed().addValueObserver(v -> {});
+   }
 
-      // 4. Create layers
-      mLayers = new Layers(this);
-      createLayers();
-
-      // 5. Keep-alive timer
-      startKeepAlive();
-
-      host.println("FaderPort v2 initialized.");
+   private RemoteControl getDeviceControl()
+   {
+      return mRemoteControls.getParameter(0);
    }
 
    // ===========================================================================
@@ -449,36 +457,41 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initDefaultLayer()
    {
-      // Transport: Play
-      bindPressed(mDefaultLayer, mPlayButton, () -> mTransport.play());
+      initTransportBindings();
+      initShiftTracking();
+      initFaderFeedback();
+      initEncoderModeButtons();
+      initFaderModeButtons();
+   }
+
+   private void initTransportBindings()
+   {
+      bindPressed(mDefaultLayer, mPlayButton, this::togglePlayback);
       mPlayLight.isOn().setValueSupplier(mTransport.isPlaying());
 
-      // Transport: Stop
-      bindPressed(mDefaultLayer, mStopButton, () -> mTransport.stop());
+      bindPressed(mDefaultLayer, mStopButton, this::stopPlayback);
       mStopLight.isOn().setValueSupplier(() -> !mTransport.isPlaying().get());
 
-      // Transport: Record
       bindPressed(mDefaultLayer, mRecordButton,
-         () -> mTransport.isArrangerRecordEnabled().toggle());
+         this::toggleRecord);
       mRecordLight.isOn().setValueSupplier(mTransport.isArrangerRecordEnabled());
 
-      // Transport: Loop
       bindPressed(mDefaultLayer, mLoopButton,
-         () -> mTransport.isArrangerLoopEnabled().toggle());
+         this::toggleLoop);
       mLoopLight.isOn().setValueSupplier(mTransport.isArrangerLoopEnabled());
 
-      // Transport: Click (metronome)
       bindPressed(mDefaultLayer, mClickButton,
-         () -> mTransport.isMetronomeEnabled().toggle());
+         this::toggleMetronome);
       mClickLight.isOn().setValueSupplier(mTransport.isMetronomeEnabled());
 
-      // Transport: Rewind / FFwd
-      bindPressed(mDefaultLayer, mRewindButton, () -> mTransport.rewind());
-      bindPressed(mDefaultLayer, mFfwdButton, () -> mTransport.fastForward());
+      bindPressed(mDefaultLayer, mRewindButton, this::rewindTransport);
+      bindPressed(mDefaultLayer, mFfwdButton, this::fastForwardTransport);
       mRewindLight.isOn().setValueSupplier(mRewindButton.isPressed());
       mFfwdLight.isOn().setValueSupplier(mFfwdButton.isPressed());
+   }
 
-      // Shift tracking
+   private void initShiftTracking()
+   {
       bindPressed(mDefaultLayer, mShiftButton, () -> {
          mIsShiftHeld = true;
          mShiftLayer.activate();
@@ -488,31 +501,38 @@ public class FaderPort2Extension extends ControllerExtension
          mShiftLayer.deactivate();
       });
       mShiftLight.isOn().setValueSupplier(mShiftButton.isPressed());
+   }
 
-      // Fader is managed outside the layer system - see updateFaderHardwareBinding()
-      // Motor fader feedback: observers for all potential fader targets (normalized 0.0-1.0)
-      mCursorTrack.volume().value().addValueObserver(v -> { if (!mMasterModeActive && !mDeviceModeActive && !mFlipModeActive) onFaderTargetChanged(v); });
-      mMasterTrack.volume().value().addValueObserver(v -> { if (mMasterModeActive) onFaderTargetChanged(v); });
-      mRemoteControls.getParameter(0).value().addValueObserver(v -> { if (mDeviceModeActive) onFaderTargetChanged(v); });
-      mCursorTrack.pan().value().addValueObserver(v -> { if (mFlipModeActive) onFaderTargetChanged(v); });
-      // Bind fader to default target
+   private void initFaderFeedback()
+   {
+      mCursorTrack.volume().value().addValueObserver(
+         value -> { if (isDefaultFaderModeActive()) onFaderTargetChanged(value); });
+      mMasterTrack.volume().value().addValueObserver(
+         value -> { if (mMasterModeActive) onFaderTargetChanged(value); });
+      getDeviceControl().value().addValueObserver(
+         value -> { if (mDeviceModeActive) onFaderTargetChanged(value); });
+      mCursorTrack.pan().value().addValueObserver(
+         value -> { if (mFlipModeActive) onFaderTargetChanged(value); });
+
       updateFaderHardwareBinding();
+   }
 
-      // Encoder mode buttons
-      bindPressed(mDefaultLayer, mPanButton, () -> {
-         if (!mIsShiftHeld) mEncoderModeGroup.setActiveLayer(mPanLayer);
-      });
+   private void initEncoderModeButtons()
+   {
+      bindPressed(mDefaultLayer, mPanButton,
+         () -> runIfNotShiftHeld(() -> mEncoderModeGroup.setActiveLayer(mPanLayer)));
       bindPressed(mDefaultLayer, mChannelButton,
          () -> mEncoderModeGroup.setActiveLayer(mChannelNavLayer));
       bindPressed(mDefaultLayer, mScrollButton,
          () -> mEncoderModeGroup.setActiveLayer(mScrollLayer));
       bindPressed(mDefaultLayer, mMarkerButton,
          () -> mEncoderModeGroup.setActiveLayer(mMarkerLayer));
+   }
 
-      // Fader mode buttons
+   private void initFaderModeButtons()
+   {
       bindPressed(mDefaultLayer, mMasterButton, () -> {
-         if (!mIsShiftHeld)
-         {
+         runIfNotShiftHeld(() -> {
             mMasterModeActive = !mMasterModeActive;
             mMasterLayer.setIsActive(mMasterModeActive);
             if (mMasterModeActive)
@@ -521,35 +541,200 @@ public class FaderPort2Extension extends ControllerExtension
                mDeviceLayer.setIsActive(false);
             }
             updateFaderBinding();
-         }
+         });
       });
       mMasterLight.isOn().setValueSupplier(() -> mMasterModeActive);
 
       bindPressed(mDefaultLayer, mSectionButton, () -> {
-         if (!mIsShiftHeld)
-         {
-            mDeviceModeActive = !mDeviceModeActive;
-            mDeviceLayer.setIsActive(mDeviceModeActive);
-            if (mDeviceModeActive)
-            {
-               mMasterModeActive = false;
-               mMasterLayer.setIsActive(false);
-               // Suspend the encoder mode group so the device layer's
-               // encoder binding is the only one active
-               mSavedEncoderLayer = mEncoderModeGroup.getActiveLayer();
-               mEncoderModeGroup.setActiveLayer(null);
-            }
-            else
-            {
-               // Restore the previous encoder mode
-               mEncoderModeGroup.setActiveLayer(
-                  mSavedEncoderLayer != null ? mSavedEncoderLayer : mPanLayer);
-               mSavedEncoderLayer = null;
-            }
+         runIfNotShiftHeld(() -> {
+            toggleDeviceMode();
             updateFaderBinding();
-         }
+         });
       });
       mSectionLight.isOn().setValueSupplier(() -> mDeviceModeActive);
+   }
+
+   private void togglePlayback()
+   {
+      // Toggle playback: stop if playing, otherwise start playback
+      if (mTransport.isPlaying().get())
+      {
+         mTransport.stop();
+      }
+      else
+      {
+         mTransport.play();
+      }
+   }
+
+   private void stopPlayback()
+   {
+      mTransport.stop();
+   }
+
+   private void startPlayback()
+   {
+      mTransport.play();
+   }
+
+   private void toggleRecord()
+   {
+      mTransport.isArrangerRecordEnabled().toggle();
+   }
+
+   private void toggleLoop()
+   {
+      mTransport.isArrangerLoopEnabled().toggle();
+   }
+
+   private void toggleMetronome()
+   {
+      mTransport.isMetronomeEnabled().toggle();
+   }
+
+   private void rewindTransport()
+   {
+      mTransport.rewind();
+   }
+
+   private void fastForwardTransport()
+   {
+      mTransport.fastForward();
+   }
+
+   private void runIfNotShiftHeld(final Runnable action)
+   {
+      if (!isShiftHeld())
+      {
+         action.run();
+      }
+   }
+
+   private void undoAction()
+   {
+      mApplication.undo();
+   }
+
+   private void redoAction()
+   {
+      mApplication.redo();
+   }
+
+   private void clearAllSolos()
+   {
+      mCursorTrack.solo().set(false);
+   }
+
+   private void clearAllMutes()
+   {
+      mCursorTrack.mute().set(false);
+   }
+
+   private void toggleFlipMode()
+   {
+      mFlipModeActive = !mFlipModeActive;
+      mFlipLayer.setIsActive(mFlipModeActive);
+      updateFaderBinding();
+   }
+
+   private void toggleNoteEditorAction()
+   {
+      mApplication.toggleNoteEditor();
+   }
+
+   private void toggleMixerAction()
+   {
+      mApplication.toggleMixer();
+   }
+
+   private void toggleDevicesAction()
+   {
+      mApplication.toggleDevices();
+   }
+
+   private void toggleBrowserAction()
+   {
+      mApplication.toggleBrowserVisibility();
+   }
+
+   // Encoder helper methods
+   private void resetPan()
+   {
+      mCursorTrack.pan().reset();
+   }
+
+   private void selectPreviousTrack()
+   {
+      mCursorTrack.selectPrevious();
+   }
+
+   private void selectNextTrack()
+   {
+      mCursorTrack.selectNext();
+   }
+
+   private void scrollLeft()
+   {
+      mTransport.incPosition(-1, true);
+   }
+
+   private void scrollRight()
+   {
+      mTransport.incPosition(1, true);
+   }
+
+   private void jumpToPreviousMarker()
+   {
+      mTransport.jumpToPreviousCueMarker();
+   }
+
+   private void jumpToNextMarker()
+   {
+      mTransport.jumpToNextCueMarker();
+   }
+
+   private void deviceSelectPrevious()
+   {
+      mRemoteControls.selectPrevious();
+   }
+
+   private void deviceSelectNext()
+   {
+      mRemoteControls.selectNext();
+   }
+
+   private void resetDeviceParam()
+   {
+      mRemoteControls.getParameter(0).reset();
+   }
+
+   private void toggleDeviceMode()
+   {
+      mDeviceModeActive = !mDeviceModeActive;
+      mDeviceLayer.setIsActive(mDeviceModeActive);
+      if (mDeviceModeActive)
+      {
+         mMasterModeActive = false;
+         mMasterLayer.setIsActive(false);
+         mSavedEncoderLayer = mEncoderModeGroup.getActiveLayer();
+         mEncoderModeGroup.setActiveLayer(null);
+      }
+      else
+      {
+         mEncoderModeGroup.setActiveLayer(
+            mSavedEncoderLayer != null ? mSavedEncoderLayer : mPanLayer);
+         mSavedEncoderLayer = null;
+      }
+   }
+
+   private boolean isDefaultFaderModeActive()
+   {
+      return !mMasterModeActive && !mDeviceModeActive && !mFlipModeActive;
+   }
+
+   private boolean isShiftHeld()
+   {
+      return mIsShiftHeld;
    }
 
    // ---------------------------------------------------------------------------
@@ -558,53 +743,48 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initChannelStripLayer()
    {
-      // Solo
-      bindPressed(mChannelStripLayer, mSoloButton, () -> {
-         if (!mIsShiftHeld) mCursorTrack.solo().toggle();
-      });
+      bindPressed(mChannelStripLayer, mSoloButton,
+         () -> runIfNotShiftHeld(() -> mCursorTrack.solo().toggle()));
       mSoloLight.isOn().setValueSupplier(mCursorTrack.solo());
 
-      // Mute
-      bindPressed(mChannelStripLayer, mMuteButton, () -> {
-         if (!mIsShiftHeld) mCursorTrack.mute().toggle();
-      });
+      bindPressed(mChannelStripLayer, mMuteButton,
+         () -> runIfNotShiftHeld(() -> mCursorTrack.mute().toggle()));
       mMuteLight.isOn().setValueSupplier(mCursorTrack.mute());
 
-      // Arm
-      bindPressed(mChannelStripLayer, mArmButton, () -> mCursorTrack.arm().toggle());
+      bindPressed(mChannelStripLayer, mArmButton,
+         () -> mCursorTrack.arm().toggle());
       mArmLight.isOn().setValueSupplier(mCursorTrack.arm());
 
-      // Bypass (device enable) - RGB: green = enabled, red = bypassed
       bindPressed(mChannelStripLayer, mBypassButton,
          () -> mCursorDevice.isEnabled().toggle());
       mBypassLight.state().setValueSupplier(() ->
          mCursorDevice.isEnabled().get() ? RGBLightState.GREEN : RGBLightState.RED);
 
-      // Link (pin/unpin cursor device) - RGB: blue = pinned
       bindPressed(mChannelStripLayer, mLinkButton,
          () -> mCursorDevice.isPinned().toggle());
       mLinkLight.state().setValueSupplier(() ->
          mCursorDevice.isPinned().get() ? RGBLightState.BLUE : RGBLightState.OFF);
 
-      // Prev / Next: navigate tracks (overridden by shift layer and device layer)
-      bindPressed(mChannelStripLayer, mPrevButton, () -> {
-         if (!mIsShiftHeld)
-         {
-            if (mDeviceModeActive)
-               mCursorDevice.selectPrevious();
-            else
-               mCursorTrack.selectPrevious();
-         }
-      });
-      bindPressed(mChannelStripLayer, mNextButton, () -> {
-         if (!mIsShiftHeld)
-         {
-            if (mDeviceModeActive)
-               mCursorDevice.selectNext();
-            else
-               mCursorTrack.selectNext();
-         }
-      });
+      bindPressed(mChannelStripLayer, mPrevButton,
+         () -> runIfNotShiftHeld(this::selectPreviousNavigationTarget));
+      bindPressed(mChannelStripLayer, mNextButton,
+         () -> runIfNotShiftHeld(this::selectNextNavigationTarget));
+   }
+
+   private void selectPreviousNavigationTarget()
+   {
+      if (mDeviceModeActive)
+         mCursorDevice.selectPrevious();
+      else
+         mCursorTrack.selectPrevious();
+   }
+
+   private void selectNextNavigationTarget()
+   {
+      if (mDeviceModeActive)
+         mCursorDevice.selectNext();
+      else
+         mCursorTrack.selectNext();
    }
 
    // ---------------------------------------------------------------------------
@@ -613,41 +793,50 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initAutomationLayer()
    {
-      // Read: toggle automation write enable (Shift: automation off)
       bindPressed(mAutoLayer, mAutoReadButton, () -> {
-         if (mIsShiftHeld)
-            mTransport.automationWriteMode().set("latch");
+         if (isShiftHeld())
+            setLatchAutomationMode();
          else
             mTransport.toggleWriteArrangerAutomation();
       });
-      mAutoReadLight.state().setValueSupplier(() -> {
-         final String mode = mTransport.automationWriteMode().get();
-         return "latch".equals(mode) ? RGBLightState.GREEN
-            : RGBLightState.OFF;
-      });
+      mAutoReadLight.state().setValueSupplier(this::getAutoReadLightState);
 
-      // Write: write mode (Shift: trim)
-      bindPressed(mAutoLayer, mAutoWriteButton, () -> {
-         mTransport.automationWriteMode().set("write");
-      });
-      mAutoWriteLight.state().setValueSupplier(() -> {
-         final String mode = mTransport.automationWriteMode().get();
-         return "write".equals(mode) ? RGBLightState.RED : RGBLightState.OFF;
-      });
+      bindPressed(mAutoLayer, mAutoWriteButton,
+         () -> mTransport.automationWriteMode().set("write"));
+      mAutoWriteLight.state().setValueSupplier(this::getAutoWriteLightState);
 
-      // Touch: touch mode (Shift: latch)
       bindPressed(mAutoLayer, mAutoTouchButton, () -> {
-         if (mIsShiftHeld)
-            mTransport.automationWriteMode().set("latch");
+         if (isShiftHeld())
+            setLatchAutomationMode();
          else
             mTransport.automationWriteMode().set("touch");
       });
-      mAutoTouchLight.state().setValueSupplier(() -> {
-         final String mode = mTransport.automationWriteMode().get();
-         if ("touch".equals(mode)) return RGBLightState.ORANGE;
-         if ("latch".equals(mode)) return RGBLightState.YELLOW;
-         return RGBLightState.OFF;
-      });
+      mAutoTouchLight.state().setValueSupplier(this::getAutoTouchLightState);
+   }
+
+   private void setLatchAutomationMode()
+   {
+      mTransport.automationWriteMode().set("latch");
+   }
+
+   private RGBLightState getAutoReadLightState()
+   {
+      return "latch".equals(mTransport.automationWriteMode().get())
+         ? RGBLightState.GREEN : RGBLightState.OFF;
+   }
+
+   private RGBLightState getAutoWriteLightState()
+   {
+      return "write".equals(mTransport.automationWriteMode().get())
+         ? RGBLightState.RED : RGBLightState.OFF;
+   }
+
+   private RGBLightState getAutoTouchLightState()
+   {
+      final String mode = mTransport.automationWriteMode().get();
+      if ("touch".equals(mode)) return RGBLightState.ORANGE;
+      if ("latch".equals(mode)) return RGBLightState.YELLOW;
+      return RGBLightState.OFF;
    }
 
    // ---------------------------------------------------------------------------
@@ -660,36 +849,28 @@ public class FaderPort2Extension extends ControllerExtension
       bindPressed(mShiftLayer, mPrevButton, () -> mApplication.undo());
 
       // Shift+Next = Redo
-      bindPressed(mShiftLayer, mNextButton, () -> mApplication.redo());
+      bindPressed(mShiftLayer, mNextButton, this::redoAction);
 
       // Shift+Solo = Clear all solos
-      bindPressed(mShiftLayer, mSoloButton, () -> mCursorTrack.solo().set(false));
+      bindPressed(mShiftLayer, mSoloButton, this::clearAllSolos);
 
       // Shift+Mute = Clear all mutes
-      bindPressed(mShiftLayer, mMuteButton, () -> mCursorTrack.mute().set(false));
+      bindPressed(mShiftLayer, mMuteButton, this::clearAllMutes);
 
       // Shift+Pan = Toggle fader flip mode
-      bindPressed(mShiftLayer, mPanButton, () -> {
-         mFlipModeActive = !mFlipModeActive;
-         mFlipLayer.setIsActive(mFlipModeActive);
-         updateFaderBinding();
-      });
+      bindPressed(mShiftLayer, mPanButton, this::toggleFlipMode);
 
       // Shift+Master = Toggle detail editor panel
-      bindPressed(mShiftLayer, mMasterButton,
-         () -> mApplication.toggleNoteEditor());
+      bindPressed(mShiftLayer, mMasterButton, this::toggleNoteEditorAction);
 
       // Shift+Click = Toggle mixer panel
-      bindPressed(mShiftLayer, mClickButton,
-         () -> mApplication.toggleMixer());
+      bindPressed(mShiftLayer, mClickButton, this::toggleMixerAction);
 
       // Shift+Section = Toggle device panel
-      bindPressed(mShiftLayer, mSectionButton,
-         () -> mApplication.toggleDevices());
+      bindPressed(mShiftLayer, mSectionButton, this::toggleDevicesAction);
 
       // Shift+Marker = Toggle browser
-      bindPressed(mShiftLayer, mMarkerButton,
-         () -> mApplication.toggleBrowserVisibility());
+      bindPressed(mShiftLayer, mMarkerButton, this::toggleBrowserAction);
    }
 
    // ---------------------------------------------------------------------------
@@ -698,8 +879,8 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initPanLayer()
    {
-      bindEncoder(mPanLayer, mCursorTrack.pan().value());
-      bindPressed(mPanLayer, mEncoderPush, () -> mCursorTrack.pan().reset());
+        bindEncoder(mPanLayer, mCursorTrack.pan().value());
+        bindPressed(mPanLayer, mEncoderPush, this::resetPan);
       mPanLight.state().setValueSupplier(() ->
          mPanLayer.isActive() ? RGBLightState.GREEN : RGBLightState.OFF);
    }
@@ -710,9 +891,9 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initChannelNavLayer()
    {
-      bindEncoderStepping(mChannelNavLayer,
-         () -> mCursorTrack.selectPrevious(),
-         () -> mCursorTrack.selectNext());
+         bindEncoderStepping(mChannelNavLayer,
+            this::selectPreviousTrack,
+            this::selectNextTrack);
       mChannelLight.state().setValueSupplier(() ->
          mChannelNavLayer.isActive() ? RGBLightState.CYAN : RGBLightState.OFF);
    }
@@ -723,11 +904,10 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initScrollLayer()
    {
-      bindEncoderStepping(mScrollLayer,
-         () -> mTransport.incPosition(-1, true),
-         () -> mTransport.incPosition(1, true));
-      bindPressed(mScrollLayer, mEncoderPush,
-         () -> mTransport.play());
+         bindEncoderStepping(mScrollLayer,
+            this::scrollLeft,
+            this::scrollRight);
+         bindPressed(mScrollLayer, mEncoderPush, this::startPlayback);
       mScrollLight.state().setValueSupplier(() ->
          mScrollLayer.isActive() ? RGBLightState.YELLOW : RGBLightState.OFF);
    }
@@ -738,9 +918,9 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initMarkerLayer()
    {
-      bindEncoderStepping(mMarkerLayer,
-         () -> mTransport.jumpToPreviousCueMarker(),
-         () -> mTransport.jumpToNextCueMarker());
+         bindEncoderStepping(mMarkerLayer,
+            this::jumpToPreviousMarker,
+            this::jumpToNextMarker);
 
       mMarkerLight.state().setValueSupplier(() ->
          mMarkerLayer.isActive() ? RGBLightState.MAGENTA : RGBLightState.OFF);
@@ -761,13 +941,13 @@ public class FaderPort2Extension extends ControllerExtension
 
    private void initDeviceLayer()
    {
-      final RemoteControl param = mRemoteControls.getParameter(0);
+         final RemoteControl param = mRemoteControls.getParameter(0);
       // Motor feedback handled by central observer in initDefaultLayer
 
-      bindEncoderStepping(mDeviceLayer,
-         () -> mRemoteControls.selectPrevious(),
-         () -> mRemoteControls.selectNext());
-      bindPressed(mDeviceLayer, mEncoderPush, () -> param.reset());
+         bindEncoderStepping(mDeviceLayer,
+            this::deviceSelectPrevious,
+            this::deviceSelectNext);
+         bindPressed(mDeviceLayer, mEncoderPush, this::resetDeviceParam);
    }
 
    // ---------------------------------------------------------------------------

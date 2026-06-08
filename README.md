@@ -48,12 +48,12 @@ The compiled extension is automatically copied to your Bitwig Extensions directo
 | Button | Action |
 |--------|--------|
 | Play | Toggle playback |
-| Stop | Stop / return to zero |
+| Stop | Stop playback |
 | Record | Toggle arranger record |
 | Loop | Toggle loop |
 | Click | Toggle metronome |
-| Rewind | Rewind (hold) |
-| FFwd | Fast forward (hold) |
+| Rewind | Rewind |
+| FFwd | Fast forward |
 
 ### Channel Strip
 
@@ -131,6 +131,25 @@ In **Device mode**, the encoder scrolls through remote control pages regardless 
 
 ---
 
-## License
+## Developer: Code → Actions mapping
+
+This section maps important helper methods in the code to the user-facing actions described above. It can be useful when linking docs to the implementation in `src/main/java`.
+
+- **Playback:** `togglePlayback()` — Play button (toggle play/stop)
+- **Stop:** `stopPlayback()` — Stop button
+- **Record:** `toggleRecord()` — Record button (toggle arranger record)
+- **Loop:** `toggleLoop()` — Loop button
+- **Metronome:** `toggleMetronome()` — Click button (toggle metronome)
+- **Rewind / FFwd:** `rewindTransport()`, `fastForwardTransport()` — Rewind / FFwd buttons
+- **Pan / Encoder reset:** `resetPan()` — Pan encoder push
+- **Channel navigation:** `selectPreviousTrack()`, `selectNextTrack()` — Channel encoder mode
+- **Scroll:** `scrollLeft()`, `scrollRight()` — Scroll encoder mode
+- **Markers:** `jumpToPreviousMarker()`, `jumpToNextMarker()` — Marker encoder mode
+- **Device parameter:** `resetDeviceParam()` — Encoder push in Device mode
+- **Device mode toggle:** `toggleDeviceMode()` — Section (Device) button
+- **Flip mode toggle:** `toggleFlipMode()` — Shift + Pan
+- **Shift overlays:** `undoAction()`, `redoAction()`, `clearAllSolos()`, `clearAllMutes()` — Shift combos
+
+Implementation: `src/main/java/com/smetoyer/bitwig/faderport2/FaderPort2Extension.java`
 
 MIT License — see [LICENSE](LICENSE)
